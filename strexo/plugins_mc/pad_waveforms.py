@@ -4,9 +4,10 @@ import strax
 import strexo
 from strexo import units
 
-__all__ = ["PadWaveforms"]
+export, __all__ = strax.exporter()
 
 
+@export
 @strax.takes_config(
     strax.Option(
         "electron_vdrift",
@@ -47,22 +48,25 @@ __all__ = ["PadWaveforms"]
         # but this sets the dtype
     ),
 )
-class PadWaveforms(strexo.SimulationPlugin):
+class SimulatePadWaveforms(strexo.SimulationPlugin):
     """Generates noise-free charge collection waveforms
-    for NEST hits in each pad.
+    for each NEST hit in each nearby pad.
+
+    The waveforms are not yet summed: one pad may have multiple overlapping
+        waveforms (if different hits are recorded nearby).
 
     We only simulate the 5x5 grid of pads around the center of the collected
-    electron cloud.
+        electron cloud.
 
     Charge collection is simulated fully (at a single-electron level),
-    assuming independent Gaussian diffusion in three dimensions.
+        assuming independent Gaussian diffusion in three dimensions.
 
     Induction waveforms from each pad are drawn from a template bank,
-    indexed by (r, theta, sigma_r, sigma_z).
-        Here (r, theta) is the position of the electron cloud center in polar
-        coordinates with origin on the pad center,
-        and (sigma_r, sigma_z) are the cloud's transverse and longitudinal
-        diffusion standard deviations.
+        indexed by (r, theta, sigma_r, sigma_z). Here,
+        (r, theta) is the position of the electron cloud center in polar
+            coordinates with origin on the pad center, and
+        (sigma_r, sigma_z) are the cloud's transverse and longitudinal
+            diffusion standard deviations.
 
     Note the induction waveforms won't be completely realistic:
         (a) the templates assume each cloud comes in from deep in the TPC, and
@@ -80,12 +84,13 @@ class PadWaveforms(strexo.SimulationPlugin):
 
     # Time (in ns) between the induction waveform template start
     # and the time at which the electron cloud center is collected.
-    template_rise_time: float
+    template_rise_time: int
 
     def infer_dtype(self):
         c = self.config
         return strax.time_dt_fields + [
-            (("Pad index", "pad"), np.int32),
+            (("x-index of pad, negative in left half", "pad_xi"), np.int32),
+            (("y-index of pad, negative in lower half", "pad_yi"), np.int32),
             (
                 ("Current waveform [electrons/sample]", "data"),
                 np.float64,
@@ -111,7 +116,6 @@ class PadWaveforms(strexo.SimulationPlugin):
     def compute(self, nest_hits, start, end):
         c = self.config
         hits = nest_hits
-        apgw = c["active_pad_grid_width"]
 
         # Compute size, collection time and position of electron cloud
         drift_length = strexo.ANODE_Z - hits["z"]
@@ -127,16 +131,22 @@ class PadWaveforms(strexo.SimulationPlugin):
         sigma_z = np.sqrt(2 * drift_time * c["electron_longitudinal_diffusion"])
         sigma_t = sigma_z / c["electron_vdrift"]
 
-        # Index of the central pad (pad that would collect the cloud center),
+        # Find indices of the central pad (which 'collects' the cloud center),
         # and offset of the cloud center in the central pad
-        i_central, dx, dy = self.pad_and_offset(x_center, y_center)
+        ap = strexo.ANODE_PITCH
+        pad_xi = (x_center // ap).astype(np.int32)
+        pad_yi = (y_center // ap).astype(np.int32)
+        dx, dy = x_center % ap, y_center % ap
 
         # Draw induction waveform templates for the active pads.
-        # results is a (n_hits, apgw, apgw) array (for now)
+        # results is a (n_hits, apgw, apgw) structured array
         results = self.induction_waveforms(n_electrons, dx, dy, sigma_z, sigma_r)
 
-        # Set indices of the active pad grid, (n_hits, apgw, apgw) array
-        results["pad"] = self.pads_around(i_central, n=apgw)
+        # Set pad indices for the waveforms
+        apgw = c["active_pad_grid_width"]
+        grid = np.arange(-apgw // 2 + 1, apgw // 2 + 1, dtype=np.int32)
+        results["pad_xi"] = pad_xi[:, None, None] + grid[None, :, None]
+        results["pad_yi"] = pad_yi[:, None, None] + grid[None, None, :]
 
         # Set results['time'] to the start time of the first sample
         # TODO: think about round/int, and/or make template depend on t%dt
@@ -239,36 +249,3 @@ class PadWaveforms(strexo.SimulationPlugin):
             np.add.at(results["data"], (hit_i, xi, yi, ti), 1)
 
         return results
-
-    def pad_and_offset(self, x, y):
-        """Return pad numbers and offsets corresponding to positions
-
-        Arguments:
-         - x: array-like, x-coordinates in TPC frame (0 at center)
-         - y: array-like, y-coordinates in TPC frame (0 at center)
-
-        Returns: (pad_index, dx, dy)
-         - pad_number: array-like of ints, pad numbers
-         - dx: array-like, x-coordinates in pad frame (0 at center)
-         - dy: array-like, x-coordinates in pad frame (0 at cemter)
-
-        For now, pad numbers are x // anode_pitch + 1000 * y // anode_pitch.
-            Assuming the TPC center is right above a cross of pads, pad 0 has
-            positive x and y coordinates and the TPC center at its lower left.
-        """
-        ap = strexo.ANODE_PITCH
-        pad_number = (x // ap + 1000 * y // ap).astype(np.int32)
-        return pad_number, x % ap, y % ap
-
-    def pads_around(self, central_pad_number, n):
-        """Return (m, n, n) array of ints of pad numbers, for nxn pad grid
-        centered on pad_index. Here m = len(pad_index).
-        """
-        # See pads_and_offset for pad number definition
-        grid = np.arange(-n // 2 + 1, n // 2 + 1, dtype=np.int32)
-        assert len(grid) == n
-        return (
-            central_pad_number[:, None, None]
-            + grid[None, :, None,]
-            + 1000 * grid[None, None, :]
-        )
