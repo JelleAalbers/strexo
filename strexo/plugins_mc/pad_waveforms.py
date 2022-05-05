@@ -133,10 +133,7 @@ class SimulatePadWaveforms(strexo.SimulationPlugin):
 
         # Find indices of the central pad (which 'collects' the cloud center),
         # and offset of the cloud center in the central pad
-        ap = strexo.ANODE_PITCH
-        pad_xi = (x_center // ap).astype(np.int32)
-        pad_yi = (y_center // ap).astype(np.int32)
-        dx, dy = x_center % ap, y_center % ap
+        pad_xi, pad_yi, dx, dy = strexo.pos_to_pad(x_center, y_center)
 
         # Draw induction waveform templates for the active pads.
         # results is a (n_hits, apgw, apgw) structured array

@@ -1,9 +1,4 @@
 """Put commonly used constants here"""
-
-from immutabledict import immutabledict as idict
-
-import numpy as np
-
 import strax
 
 export, __all__ = strax.exporter()
