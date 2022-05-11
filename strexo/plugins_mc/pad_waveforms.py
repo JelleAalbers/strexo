@@ -16,8 +16,8 @@ export, __all__ = strax.exporter()
     ),
     strax.Option(
         "electron_transverse_diffusion",
-        default=100 * units.cm ** 2 / units.s,
-        help="Electron transverse diffusion coefficient [cm^2/ns]",
+        default=100,
+        help="Electron transverse diffusion coefficient [cm^2/s]",
     ),
     strax.Option(
         "electron_lifetime",
@@ -26,8 +26,8 @@ export, __all__ = strax.exporter()
     ),
     strax.Option(
         "electron_longitudinal_diffusion",
-        default=10 * units.cm ** 2 / units.s,
-        help="Electron longitudinal diffusion coefficient [cm^2/ns]",
+        default=10,
+        help="Electron longitudinal diffusion coefficient [cm^2/s]",
     ),
     strax.Option(
         "active_pad_grid_width",
@@ -127,8 +127,10 @@ class SimulatePadWaveforms(strexo.SimulationPlugin):
         y_center = hits["y"]
 
         # Diffusion standard deviation in r, t, and z
-        sigma_r = np.sqrt(2 * drift_time * c["electron_transverse_diffusion"])
-        sigma_z = np.sqrt(2 * drift_time * c["electron_longitudinal_diffusion"])
+        # TODO: explicit 1e-9 is clunky, temp hack to st.show_config doesn't
+        # round the values to zero
+        sigma_r = np.sqrt(2 * drift_time * c["electron_transverse_diffusion"] * 1e-9)
+        sigma_z = np.sqrt(2 * drift_time * c["electron_longitudinal_diffusion"] * 1e-9)
         sigma_t = sigma_z / c["electron_vdrift"]
 
         # Find indices of the central pad (which 'collects' the cloud center),
